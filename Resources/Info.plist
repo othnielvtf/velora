@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleName</key><string>Velora</string>
+    <key>CFBundleDisplayName</key><string>Velora</string>
+    <key>CFBundleIdentifier</key><string>app.velora.player</string>
+    <key>CFBundleExecutable</key><string>Velora</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSLocalNetworkUsageDescription</key><string>Velora streams your movie from this Mac to the AirPlay TV you choose on your local network.</string>
+    <key>NSBonjourServices</key><array><string>_airplay._tcp</string><string>_raop._tcp</string></array>
+    <key>NSAppTransportSecurity</key><dict>
+        <key>NSAllowsLocalNetworking</key><true/>
+        <key>NSAllowsArbitraryLoadsForMedia</key><true/>
+    </dict>
+    <key>CFBundleDocumentTypes</key><array><dict>
+        <key>CFBundleTypeName</key><string>Video</string>
+        <key>CFBundleTypeRole</key><string>Viewer</string>
+        <key>LSHandlerRank</key><string>Alternate</string>
+        <key>LSItemContentTypes</key><array><string>public.movie</string><string>org.matroska.mkv</string><string>org.webmproject.webm</string></array>
+    </dict></array>
+    <key>UTImportedTypeDeclarations</key><array><dict>
+        <key>UTTypeIdentifier</key><string>org.matroska.mkv</string>
+        <key>UTTypeDescription</key><string>Matroska Video</string>
+        <key>UTTypeConformsTo</key><array><string>public.movie</string></array>
+        <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>mkv</string></array></dict>
+    </dict></array>
+</dict></plist>
