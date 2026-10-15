@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0 — 2026-10-15
+
+- Audio & Subtitles menu in windowed and compact fullscreen playback.
+- Select audio languages in TV Compatibility and Original modes. Compatibility switching retains playback position, pause/play state and caption choice.
+- Embedded SRT/ASS/SSA/WebVTT/MP4 text subtitles, optional native HLS captions, language switching and Off.
+- External UTF-8 SRT/VTT/ASS/SSA loading, replacement and removal; subtitle drag-and-drop and ⇧⌘O.
+- SDH and forced-track metadata, including distinct tracks in the same language.
+- Captions stay above visible fullscreen controls and return to normal placement when controls fade.
+- Eight unit tests and a generated two-language streaming/AVPlayer verification utility.
+
+PGS/VobSub image subtitles and full ASS typography are not supported in TV Compatibility. AirPlay receiver caption rendering still requires physical TV testing.
+
 ## 0.1.0 — 2026-10-15
 
 Initial public preview for Apple silicon Macs running macOS 14 or later.

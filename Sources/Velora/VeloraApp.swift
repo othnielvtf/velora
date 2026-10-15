@@ -38,6 +38,9 @@ struct VeloraApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Open Movie…", action: model.openPanel).keyboardShortcut("o")
+                Button("Load Subtitles…", action: model.loadSubtitlePanel)
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
+                    .disabled(model.media == nil || model.isPreparing)
                 Button("Close Movie", action: model.close).keyboardShortcut("w", modifiers: [.command, .shift])
             }
             CommandMenu("Playback") {

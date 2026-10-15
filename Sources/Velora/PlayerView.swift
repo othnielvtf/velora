@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import VeloraCore
 
 private let lavender = Color(red: 0.68, green: 0.59, blue: 1)
@@ -15,6 +16,7 @@ struct PlayerView: View {
     @State private var controlsVisible = true
     @State private var pointerInControls = false
     @State private var routePickerPresented = false
+    @State private var menuPresented = false
     @State private var hideControlsTask: Task<Void, Never>?
 
     var body: some View {
@@ -42,12 +44,13 @@ struct PlayerView: View {
         .background(PlayerWindowReader(state: windowState).frame(width: 0, height: 0))
         .tint(lavender)
         .sheet(isPresented: $showingSettings) { settings }
-        .onChange(of: model.mode) { _, _ in if appeared { model.reload() } }
         .onChange(of: model.quality) { _, _ in if appeared { model.reload() } }
         .onChange(of: model.selectedAddress) { old, new in if appeared && old != new && model.mode == .compatibility { model.reload() } }
         .onChange(of: windowState.isFullscreen) { _, _ in revealControls() }
         .onChange(of: windowState.interactionCounter) { _, _ in revealControls() }
         .onChange(of: shouldAutoHide) { _, _ in revealControls() }
+        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) { _ in menuPresented = true; revealControls() }
+        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didEndTrackingNotification)) { _ in menuPresented = false; revealControls() }
         .onAppear { appeared = true; windowState.onSkip = model.skip }
         .onDisappear { hideControlsTask?.cancel(); windowState.detach() }
     }
@@ -56,7 +59,7 @@ struct PlayerView: View {
         ZStack {
             Color.black
             if model.media != nil {
-                MovieSurface(player: model.player)
+                MovieSurface(player: model.player, liftCaptions: windowState.isFullscreen && controlsVisible)
                     .overlay {
                         Color.clear.contentShape(Rectangle())
                             .onTapGesture(count: 2, perform: windowState.toggleFullscreen)
@@ -115,7 +118,7 @@ struct PlayerView: View {
     private var shouldAutoHide: Bool {
         windowState.isFullscreen && model.media != nil && model.isPlaying &&
         !model.isAirPlaying && model.busyText == nil && model.errorMessage == nil &&
-        !scrubbing && !pointerInControls && !routePickerPresented && !showingSettings && !isTargeted
+        !scrubbing && !pointerInControls && !routePickerPresented && !menuPresented && !showingSettings && !isTargeted
     }
 
     private func revealControls() {
@@ -249,7 +252,7 @@ struct PlayerView: View {
             ForEach(PlaybackMode.allCases) { mode in
                 let selected = model.mode == mode
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { model.mode = mode }
+                    withAnimation(.easeInOut(duration: 0.15)) { model.setMode(mode) }
                 } label: {
                     Label(mode.rawValue, systemImage: mode == .compatibility ? "airplayvideo" : "film")
                         .font(.system(size: 12, weight: selected ? .semibold : .medium))
@@ -366,6 +369,7 @@ struct PlayerView: View {
                     }
                     .help("Volume")
                     Rectangle().fill(.white.opacity(0.1)).frame(width: 1, height: 14)
+                    tracksMenu
                     Menu {
                         ForEach([Float(1), 1.25, 1.5, 2], id: \.self) { speed in
                             Button("\(String(format: "%g", speed))×") { model.setRate(speed) }
@@ -390,6 +394,36 @@ struct PlayerView: View {
             .frame(height: windowState.isFullscreen ? 40 : 52)
             .buttonStyle(.plain).disabled(model.media == nil || model.isPreparing)
         }
+    }
+
+    private var tracksMenu: some View {
+        Menu {
+            Section("Audio") {
+                if model.audioOptions.isEmpty { Text("No selectable audio tracks") }
+                ForEach(model.audioOptions) { option in
+                    Toggle(option.label, isOn: Binding(get: { model.selectedAudioTrackID == option.id }, set: { if $0 { model.selectAudio(option.id) } }))
+                }
+            }
+            Section("Subtitles") {
+                Toggle("Off", isOn: Binding(get: { model.selectedSubtitleID == "off" }, set: { if $0 { model.selectSubtitle("off") } }))
+                ForEach(model.subtitleOptions) { option in
+                    Toggle(option.label, isOn: Binding(get: { model.selectedSubtitleID == option.id }, set: { if $0 { model.selectSubtitle(option.id) } }))
+                }
+                if model.mode == .compatibility, let media = model.media,
+                   media.subtitleTracks.contains(where: { !$0.supportsTextSubtitles }) {
+                    Text("Image subtitles (PGS / VobSub) need an external text file")
+                }
+            }
+            Divider()
+            Button("Load Subtitle File…", action: model.loadSubtitlePanel)
+            if model.externalSubtitle != nil { Button("Remove External Subtitles", action: model.removeExternalSubtitle) }
+        } label: {
+            Image(systemName: model.selectedSubtitleID == "off" ? "captions.bubble" : "captions.bubble.fill")
+                .font(.system(size: 15)).frame(width: 24, height: 24)
+                .foregroundStyle(model.selectedSubtitleID == "off" ? .white.opacity(0.7) : lavender)
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .accessibilityLabel("Audio & Subtitles").help("Choose audio language or subtitles")
     }
 
     private var connectionStrip: some View {
@@ -466,7 +500,8 @@ struct PlayerView: View {
                 if let media = model.media {
                     Section("This movie") {
                         LabeledContent("Video", value: "\(media.codecLabel) · \(media.width) × \(media.height)")
-                        LabeledContent("Audio", value: media.audioCodec?.uppercased() ?? "No audio")
+                        LabeledContent("Audio", value: model.audioOptions.first(where: { $0.id == model.selectedAudioTrackID })?.label ?? "No audio")
+                        LabeledContent("Subtitles", value: model.subtitleOptions.first(where: { $0.id == model.selectedSubtitleID })?.label ?? "Off")
                         LabeledContent("Duration", value: timeLabel(media.duration))
                         LabeledContent("Temporary cache", value: ByteCountFormatter.string(fromByteCount: model.cacheBytes, countStyle: .file))
                     }
@@ -477,7 +512,7 @@ struct PlayerView: View {
                 }
             }.formStyle(.grouped)
             HStack {
-                Text("VELORA 0.1 · APPLE SILICON").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary)
+                Text("VELORA 0.2 · APPLE SILICON").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary)
                 Spacer()
                 Button("Copy Diagnostics", action: model.copyDiagnostics)
             }

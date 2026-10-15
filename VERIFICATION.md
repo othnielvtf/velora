@@ -1,4 +1,24 @@
-# Velora 0.1.0 verification
+# Velora verification
+
+## 0.2.0 — audio and subtitles
+
+Checked on 15 October 2026 on the same Apple M5 Pro/macOS/Swift toolchain described below.
+
+- Eight unit tests passed, including exact global track indexes, default audio disposition, language normalization, safe HLS metadata, SDH tags, WebVTT segment boundaries, multilingual text, empty subtitle segments and invalid timestamps.
+- A 30-second HEVC MKV with two audio tracks and three text subtitle tracks passed the real streaming check. The two selected audio streams decoded to the correct 440 Hz and 880 Hz tones, measured after AAC priming/padding.
+- AVPlayer exposed English, Japanese and English SDH as separate native subtitle options. HLS NAME identity was verified through common-title metadata, since localized display names omit source track names.
+- The actual AVPlayer legible output delivered English and Japanese captions, switched languages, delivered the correct Japanese text after a distant seek, and disabled subtitles with Off.
+- Concurrent requests for the same subtitle segment returned the same result. Full subtitle VOD playlists and unknown-track URL rejection passed.
+- External SRT, VTT and ASS files converted into correctly timed WebVTT, including cues spanning four-second chunk boundaries.
+- A native HEVC MP4 with two AAC tracks and timed-text subtitles passed Original-mode audio selection and English/Japanese caption delivery checks.
+- The repository's standalone `scripts/verify-tracks.sh` generated its own H.264/two-tone/WebVTT MKV fixture and passed the complete audio/subtitle integration check using only the bundled tools.
+- In the native interface, choosing another audio track retained a paused position of 22.266 seconds and the subtitle selection. English captions rendered visibly above the compact fullscreen controls.
+- The existing HEVC/AAC and silent 10-bit PQ-tagged playback integration checks passed again with the updated core and rebuilt tools.
+- Subtitle changes made while paused may need playback to resume before the caption display refreshes. The external subtitle file panel was inspected, but its complete interactive import was not verified before user testing began. External SRT/VTT/ASS conversion passed the separate automated check.
+
+Physical AirPlay TV audio/subtitle switching and rendering remain untested. PGS/VobSub bitmap captions, full ASS typography, karaoke and font attachments are outside this version's TV Compatibility support.
+
+## 0.1.0 baseline
 
 Release checks completed on 15 October 2026 on an Apple M5 Pro running macOS 26.6.2, using Swift 6.4, Apple Clang 21 and the macOS 27 SDK. Minimum deployment target: macOS 14. Earlier supported macOS versions and other Mac hardware have not been tested.
 

@@ -152,6 +152,18 @@ public final class StreamHTTPServer: @unchecked Sendable {
         let data: Data, type: String
         if name == "master.m3u8" { data = Data(session.masterPlaylist().utf8); type = "application/vnd.apple.mpegurl" }
         else if name == "video.m3u8" { data = Data(session.timeline.playlist().utf8); type = "application/vnd.apple.mpegurl" }
+        else if name.hasPrefix("subtitles/") {
+            let parts = name.split(separator: "/", omittingEmptySubsequences: false)
+            guard parts.count == 3, session.subtitles.contains(where: { $0.id == parts[1] }) else { return .message(404, "Not found") }
+            if parts[2] == "index.m3u8" {
+                data = Data(session.timeline.playlist(segmentExtension: "vtt").utf8); type = "application/vnd.apple.mpegurl"
+            } else if parts[2].hasPrefix("segment-"), parts[2].hasSuffix(".vtt"),
+                      let index = Int(parts[2].dropFirst(8).dropLast(4)), (0..<session.timeline.count).contains(index) {
+                do { data = try await session.subtitleSegment(trackID: String(parts[1]), index: index); type = "text/vtt; charset=utf-8" }
+                catch is CancellationError { return .message(503, "Playback session closed") }
+                catch { onError("Subtitles: \(error.localizedDescription)"); return .message(503, "This subtitle track could not be prepared") }
+            } else { return .message(404, "Not found") }
+        }
         else if name.hasPrefix("segment-"), name.hasSuffix(".ts"),
                 let index = Int(name.dropFirst(8).dropLast(3)), (0..<session.timeline.count).contains(index) {
             do { data = try Data(contentsOf: await session.segment(index)); type = "video/mp2t" }

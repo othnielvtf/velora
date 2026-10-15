@@ -93,7 +93,7 @@ def main():
               "--enable-libzimg", "--pkg-config=../zimg-pkg-config",
               "--extra-cflags=-arch arm64 -mmacosx-version-min=14.0",
               "--extra-ldflags=-arch arm64 -mmacosx-version-min=14.0",
-              "--disable-encoders", "--enable-encoder=h264_videotoolbox,aac,png"]
+              "--disable-encoders", "--enable-encoder=h264_videotoolbox,aac,png,webvtt,pcm_s16le"]
     print("Configuring FFmpeg 9.0.2", flush=True)
     run(config, cwd=ffmpeg)
     (BUILD / "ffmpeg-configure.txt").write_text(shlex.join(config) + "\n")

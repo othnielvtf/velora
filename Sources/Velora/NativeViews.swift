@@ -58,6 +58,8 @@ private final class SlimVolumeSliderCell: NSSliderCell {
 
 struct MovieSurface: NSViewRepresentable {
     let player: AVPlayer
+    var liftCaptions = false
+    func makeCoordinator() -> Coordinator { Coordinator() }
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
         view.player = player; view.controlsStyle = .none; view.videoGravity = .resizeAspect
@@ -66,6 +68,21 @@ struct MovieSurface: NSViewRepresentable {
     }
     func updateNSView(_ nsView: AVPlayerView, context: Context) {
         nsView.player = player
+        if context.coordinator.item !== player.currentItem || context.coordinator.lifted != liftCaptions {
+            // Keep native captions above the floating controls, and restore source
+            // placement when those controls fade or the window leaves fullscreen.
+            let rule = liftCaptions ? AVTextStyleRule(textMarkupAttributes: [
+                kCMTextMarkupAttribute_OrthogonalLinePositionPercentageRelativeToWritingDirection as String: 84
+            ]) : nil
+            player.currentItem?.textStyleRules = rule.map { [$0] }
+            context.coordinator.item = player.currentItem
+            context.coordinator.lifted = liftCaptions
+        }
+    }
+
+    final class Coordinator {
+        weak var item: AVPlayerItem?
+        var lifted: Bool?
     }
 }
 

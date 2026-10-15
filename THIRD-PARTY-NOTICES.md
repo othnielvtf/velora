@@ -12,11 +12,11 @@ Velora bundles two standalone executables built from the unmodified FFmpeg 9.0.2
 - Source: <https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz>.
 - Source archive SHA-256: `8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`.
 - License: `Resources/FFmpeg-LICENSE.txt` (also copied into the app's Resources directory).
-- Build: `scripts/build-tools.py`, using Xcode's Clang, native Apple VideoToolbox/AudioToolbox and statically linked zimg. Network protocols and third-party autodetection are disabled. H.264 VideoToolbox, AAC and PNG encoders are enabled; decoders and container support use FFmpeg's built-in implementations.
+- Build: `scripts/build-tools.py`, using Xcode's Clang, native Apple VideoToolbox/AudioToolbox and statically linked zimg. Network protocols and third-party autodetection are disabled. H.264 VideoToolbox, AAC, WebVTT and PCM (for verification) encoders are enabled; decoders and container support use FFmpeg's built-in implementations.
 
 FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project. Velora is an independent project and is not endorsed by FFmpeg.
 
-The **Velora-0.1.0-media-tools-source.tar.gz** release asset contains the exact upstream FFmpeg and zimg source archives, their license texts, the build script and build instructions. These are hosted alongside the app download at <https://github.com/othnielvtf/velora/releases/tag/v0.1.0>. The script verifies both source checksums before building. No patches are applied to either upstream source tree.
+The **Velora-0.2.0-media-tools-source.tar.gz** release asset contains the exact upstream FFmpeg and zimg source archives, their license texts, the build script and build instructions. These are hosted alongside the app download at <https://github.com/othnielvtf/velora/releases/tag/v0.2.0>. The script verifies both source checksums before building. No patches are applied to either upstream source tree.
 
 Users may rebuild or replace the tools in `Velora.app/Contents/Resources/Tools` for their own use. After changing bundle contents, its ad hoc signature must be regenerated. See `scripts/build.sh` for the packaging command. No license term restricts modification or reverse engineering for debugging those modifications.
 

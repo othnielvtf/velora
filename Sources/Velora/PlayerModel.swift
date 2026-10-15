@@ -9,10 +9,15 @@ enum PlaybackMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+struct PlaybackTrackOption: Identifiable {
+    let id: String
+    let label: String
+}
+
 @MainActor
 final class PlayerModel: ObservableObject {
     let player = AVPlayer()
-    @Published var mode: PlaybackMode = .compatibility
+    @Published private(set) var mode: PlaybackMode = .compatibility
     @Published var quality: StreamQuality = .fullHD
     @Published var addresses = LANAddress.available()
     @Published var selectedAddress = ""
@@ -31,6 +36,18 @@ final class PlayerModel: ObservableObject {
     @Published var conversionSpeed: Double = 0
     @Published var rate: Float = 1
     @Published var volume: Double = 1 { didSet { player.volume = Float(volume) } }
+    @Published private(set) var audioOptions: [PlaybackTrackOption] = []
+    @Published private(set) var subtitleOptions: [PlaybackTrackOption] = []
+    @Published private(set) var selectedAudioTrackID = ""
+    @Published private(set) var selectedSubtitleID = "off"
+    @Published private(set) var externalSubtitle: URL?
+    private var audioGroup: AVMediaSelectionGroup?
+    private var subtitleGroup: AVMediaSelectionGroup?
+    private var nativeAudio: [String: AVMediaSelectionOption] = [:]
+    private var nativeSubtitles: [String: AVMediaSelectionOption] = [:]
+    private var selectionObserver: NSObjectProtocol?
+    private var readyItemID: UUID?
+    private var pendingAutoplay = true
     private var session: TranscodeSession?
     private var server: StreamHTTPServer?
     private var probeRunner: MediaProcessRunner?
@@ -70,7 +87,7 @@ final class PlayerModel: ObservableObject {
         ]
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] _ in
             Task { @MainActor in
-                guard let self, self.media != nil, self.player.currentItem != nil, !self.isSeeking else { return }
+                guard let self, self.media != nil, self.player.currentItem != nil, !self.isSeeking, !self.isPreparing else { return }
                 let seconds = self.player.currentTime().seconds
                 guard seconds.isFinite else { return }
                 self.position = max(0, seconds)
@@ -110,12 +127,18 @@ final class PlayerModel: ObservableObject {
         }
     }
 
-    func open(_ url: URL, at start: Double = 0) {
+    func open(_ url: URL, at start: Double = 0, autoplay: Bool = true, preservingTracks: Bool = false) {
         guard url.isFileURL else { errorMessage = "Choose a local video file."; return }
+        if ["srt", "vtt", "ass", "ssa"].contains(url.pathExtension.lowercased()) { loadSubtitle(url); return }
+        let keptAudio = preservingTracks ? selectedAudioTrackID : ""
+        let keptSubtitle = preservingTracks ? selectedSubtitleID : "off"
+        let keptExternal = preservingTracks ? externalSubtitle : nil
         close()
+        selectedAudioTrackID = keptAudio; selectedSubtitleID = keptSubtitle; externalSubtitle = keptExternal
         let id = UUID(); loadID = id
         let runner = MediaProcessRunner(); probeRunner = runner
-        isPreparing = true; status = "Inspecting video and audio tracks…"; pendingPosition = start
+        isPreparing = true; status = "Inspecting video, audio and subtitles…"; pendingPosition = start
+        pendingAutoplay = autoplay
         let mode = mode, quality = quality, tools = tools, cacheRoot = cacheRoot
         addresses = LANAddress.available()
         if !addresses.contains(where: { $0.address == selectedAddress }) { selectedAddress = addresses.first?.address ?? "" }
@@ -129,9 +152,15 @@ final class PlayerModel: ObservableObject {
                 try Task.checkCancellation()
                 guard self.loadID == id else { return }
                 self.media = info
+                self.position = min(max(0, start), info.duration)
                 if mode == .compatibility {
+                    let selectedAudio = info.audioTracks.first { "audio-\($0.index)" == self.selectedAudioTrackID } ?? info.defaultAudioTrack
+                    self.audioOptions = info.audioTracks.map { PlaybackTrackOption(id: "audio-\($0.index)", label: "\($0.label) [\($0.ordinal + 1)]") }
+                    self.selectedAudioTrackID = selectedAudio.map { "audio-\($0.index)" } ?? ""
                     self.status = info.isHDR ? "Preparing an SDR stream for your TV…" : "Preparing the first video chunk…"
-                    let session = try TranscodeSession(media: info, quality: quality, tools: tools, cacheRoot: cacheRoot) { [weak self] event in
+                    let session = try TranscodeSession(media: info, quality: quality, tools: tools,
+                                                       audioTrackIndex: selectedAudio?.index, externalSubtitle: self.externalSubtitle,
+                                                       cacheRoot: cacheRoot) { [weak self] event in
                         Task { @MainActor in
                             guard let self, self.loadID == id else { return }
                             self.cachedIndices = event.cachedIndices; self.cacheBytes = event.cachedBytes
@@ -139,6 +168,8 @@ final class PlayerModel: ObservableObject {
                         }
                     }
                     self.session = session
+                    self.subtitleOptions = session.subtitles.map { PlaybackTrackOption(id: $0.id, label: $0.label) }
+                    if !self.subtitleOptions.contains(where: { $0.id == self.selectedSubtitleID }) { self.selectedSubtitleID = "off" }
                     let server = StreamHTTPServer(session: session) { [weak self] message in
                         Task { @MainActor in
                             guard let self, self.loadID == id else { return }
@@ -181,12 +212,16 @@ final class PlayerModel: ObservableObject {
                 guard let self, self.loadID == id else { return }
                 switch item.status {
                 case .readyToPlay:
+                    guard self.readyItemID != id else { return }
+                    self.readyItemID = id
+                    await self.configureTracks(for: item, id: id)
+                    guard self.loadID == id, self.player.currentItem === item else { return }
                     self.isPreparing = false
-                    self.status = "Ready · choose an AirPlay TV or watch here"
+                    self.status = self.pendingAutoplay ? "Ready · choose an AirPlay TV or watch here" : "Paused"
                     if self.pendingPosition > 0 {
                         let target = self.pendingPosition; self.pendingPosition = 0
-                        self.seek(target, autoplay: true)
-                    } else { self.player.playImmediately(atRate: self.rate) }
+                        self.seek(target, autoplay: self.pendingAutoplay)
+                    } else if self.pendingAutoplay { self.player.playImmediately(atRate: self.rate) }
                 case .failed:
                     self.isPreparing = false; self.isBuffering = false
                     self.errorMessage = item.error?.localizedDescription ?? "The video stream could not be played."
@@ -203,7 +238,101 @@ final class PlayerModel: ObservableObject {
 
     func reload() {
         guard let url = media?.source else { return }
-        open(url, at: position)
+        open(url, at: position, autoplay: player.rate > 0 || isBuffering, preservingTracks: true)
+    }
+
+    func setMode(_ value: PlaybackMode) {
+        guard mode != value else { return }
+        mode = value; reload()
+    }
+
+    private func configureTracks(for item: AVPlayerItem, id: UUID) async {
+        async let audible = try? item.asset.loadMediaSelectionGroup(for: .audible)
+        async let legible = try? item.asset.loadMediaSelectionGroup(for: .legible)
+        let (audio, subtitles) = await (audible, legible)
+        guard loadID == id, player.currentItem === item else { return }
+        audioGroup = audio; subtitleGroup = subtitles
+        if mode == .original {
+            let options = audio?.options ?? []
+            audioOptions = options.enumerated().map { PlaybackTrackOption(id: "native-audio-\($0.offset)", label: "\($0.element.displayName) [\($0.offset + 1)]") }
+            nativeAudio = Dictionary(uniqueKeysWithValues: zip(audioOptions.map(\.id), options))
+            if nativeAudio[selectedAudioTrackID] == nil {
+                let current = audio.flatMap { item.currentMediaSelection.selectedMediaOption(in: $0) }
+                selectedAudioTrackID = audioOptions.first { nativeAudio[$0.id] == current }?.id ?? audioOptions.first?.id ?? ""
+            }
+            if let audio, let selected = nativeAudio[selectedAudioTrackID] { item.select(selected, in: audio) }
+            let legibleOptions = subtitles?.options ?? []
+            subtitleOptions = legibleOptions.enumerated().map { PlaybackTrackOption(id: "native-subtitle-\($0.offset)", label: "\($0.element.displayName) [\($0.offset + 1)]") }
+            nativeSubtitles = Dictionary(uniqueKeysWithValues: zip(subtitleOptions.map(\.id), legibleOptions))
+        } else {
+            let mapped = await NativeMediaSelection.subtitleOptions(session?.subtitles ?? [], in: subtitles)
+            guard loadID == id, player.currentItem === item else { return }
+            nativeSubtitles = mapped
+        }
+        if nativeSubtitles[selectedSubtitleID] == nil { selectedSubtitleID = "off" }
+        if let subtitles { item.select(nativeSubtitles[selectedSubtitleID], in: subtitles) }
+        if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) }
+        selectionObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.mediaSelectionDidChangeNotification, object: item, queue: .main) { [weak self, weak item] _ in
+            Task { @MainActor in
+                guard let self, let item, self.loadID == id else { return }
+                if let group = self.subtitleGroup {
+                    let selected = item.currentMediaSelection.selectedMediaOption(in: group)
+                    self.selectedSubtitleID = selected == nil ? "off" : (self.subtitleOptions.first { self.nativeSubtitles[$0.id] == selected }?.id ?? "off")
+                }
+                if self.mode == .original, let group = self.audioGroup {
+                    let selected = item.currentMediaSelection.selectedMediaOption(in: group)
+                    self.selectedAudioTrackID = self.audioOptions.first { self.nativeAudio[$0.id] == selected }?.id ?? ""
+                }
+            }
+        }
+    }
+
+    func selectAudio(_ id: String) {
+        guard !isPreparing, selectedAudioTrackID != id, audioOptions.contains(where: { $0.id == id }) else { return }
+        selectedAudioTrackID = id
+        if mode == .original, let group = audioGroup, let option = nativeAudio[id] {
+            player.currentItem?.select(option, in: group)
+        } else { reload() }
+    }
+
+    func selectSubtitle(_ id: String) {
+        guard !isPreparing, let item = player.currentItem, let group = subtitleGroup else { return }
+        guard id == "off" || nativeSubtitles[id] != nil else {
+            errorMessage = "macOS could not select this subtitle track. Try loading an external SRT or VTT file."
+            return
+        }
+        selectedSubtitleID = id
+        if errorMessage?.hasPrefix("Subtitles:") == true { errorMessage = nil }
+        item.select(id == "off" ? nil : nativeSubtitles[id], in: group)
+    }
+
+    func loadSubtitlePanel() {
+        guard media != nil, !isPreparing else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Load Subtitles"
+        panel.message = "Choose an SRT, VTT, ASS or SSA file. External subtitles use TV Compatibility mode."
+        panel.allowedContentTypes = ["srt", "vtt", "ass", "ssa"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowsMultipleSelection = false; panel.canChooseDirectories = false
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                self?.loadSubtitle(url)
+            }
+        }
+    }
+
+    func loadSubtitle(_ url: URL) {
+        guard media != nil else { errorMessage = "Open a movie before loading subtitles."; return }
+        guard !isPreparing, url.isFileURL else { return }
+        externalSubtitle = url; selectedSubtitleID = "external"
+        mode = .compatibility; reload()
+    }
+
+    func removeExternalSubtitle() {
+        guard externalSubtitle != nil else { return }
+        externalSubtitle = nil
+        if selectedSubtitleID == "external" { selectedSubtitleID = "off" }
+        reload()
     }
 
     func togglePlayback() {
@@ -241,6 +370,10 @@ final class PlayerModel: ObservableObject {
         server?.stop(); server = nil
         if let session { session.cancelProcesses(); Task { await session.stop() } }
         session = nil
+        if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) }
+        selectionObserver = nil; readyItemID = nil
+        audioGroup = nil; subtitleGroup = nil; nativeAudio = [:]; nativeSubtitles = [:]
+        audioOptions = []; subtitleOptions = []; selectedAudioTrackID = ""; selectedSubtitleID = "off"; externalSubtitle = nil
         media = nil; position = 0; streamURL = nil; errorMessage = nil
         cachedIndices = []; cacheBytes = 0; conversionSpeed = 0
         isPreparing = false; isBuffering = false; isSeeking = false; isPlaying = false
@@ -249,11 +382,13 @@ final class PlayerModel: ObservableObject {
 
     func copyDiagnostics() {
         let text = """
-        Velora 0.1 · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
+        Velora 0.2 · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
         Mode: \(mode.rawValue) · Quality: \(quality.description)
         Source: \(media?.source.lastPathComponent ?? "None")
         Video: \(media?.codecLabel ?? "—") \(media?.width ?? 0)×\(media?.height ?? 0) · Audio: \(media?.audioCodec ?? "None")
         HDR source: \(media?.isHDR == true) · AirPlay active: \(isAirPlaying)
+        Audio selection: \(selectedAudioTrackID) · Subtitles: \(selectedSubtitleID)
+        Audio tracks: \(audioOptions.count) · Subtitle tracks: \(subtitleOptions.count)
         Position: \(position) / \(duration)
         Network: \(selectedAddress) · Server: \(streamURL == nil ? "Inactive" : "Running")
         Cached chunks: \(cachedIndices.count) · Last conversion: \(String(format: "%.2f", conversionSpeed))×

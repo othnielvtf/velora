@@ -74,7 +74,10 @@ public struct MediaInfo: Sendable {
     public let width: Int
     public let height: Int
     public let videoCodec: String
-    public let audioCodec: String?
+    public let audioTracks: [MediaTrack]
+    public let subtitleTracks: [MediaTrack]
+    public var defaultAudioTrack: MediaTrack? { audioTracks.first(where: \.isDefault) ?? audioTracks.first }
+    public var audioCodec: String? { defaultAudioTrack?.codec }
     public let frameRate: Double
     public let colorTransfer: String?
     public var isHDR: Bool { colorTransfer == "smpte2084" || colorTransfer == "arib-std-b67" }
@@ -86,6 +89,10 @@ public struct MediaInfo: Sendable {
         let data = try runner.run(tools.executable("ffprobe"), arguments: [
             "-v", "error", "-show_format", "-show_streams", "-of", "json", source.path
         ], timeout: 30)
+        return try decodeProbe(data, source: source)
+    }
+
+    public static func decodeProbe(_ data: Data, source: URL) throws -> MediaInfo {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let streams = json["streams"] as? [[String: Any]],
               let video = streams.first(where: {
@@ -102,7 +109,8 @@ public struct MediaInfo: Sendable {
         return MediaInfo(source: source, duration: duration,
                          width: video["width"] as? Int ?? 1920, height: video["height"] as? Int ?? 1080,
                          videoCodec: video["codec_name"] as? String ?? "unknown",
-                         audioCodec: streams.first { $0["codec_type"] as? String == "audio" }?["codec_name"] as? String,
+                         audioTracks: MediaTrack.parse(streams, kind: "audio"),
+                         subtitleTracks: MediaTrack.parse(streams, kind: "subtitle"),
                          frameRate: fps.isFinite && fps > 0 ? fps : 30,
                          colorTransfer: video["color_transfer"] as? String)
     }
