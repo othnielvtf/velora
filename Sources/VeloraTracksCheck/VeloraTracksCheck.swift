@@ -6,12 +6,27 @@ import VeloraCore
 private final class CaptionCapture: NSObject, AVPlayerItemLegibleOutputPushDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var text = ""
+    private var activeText = ""
+    private var firstTimes: [String: Double] = [:]
     func legibleOutput(_ output: AVPlayerItemLegibleOutput, didOutputAttributedStrings strings: [NSAttributedString],
                        nativeSampleBuffers: [Any], forItemTime itemTime: CMTime) {
-        lock.lock(); text += strings.map(\.string).joined(separator: "\n"); lock.unlock()
+        lock.lock()
+        activeText = strings.map(\.string).joined(separator: "\n")
+        for string in strings.map(\.string) {
+            text += string
+            if firstTimes[string] == nil { firstTimes[string] = itemTime.seconds }
+        }
+        lock.unlock()
     }
     func contains(_ value: String) -> Bool { lock.lock(); defer { lock.unlock() }; return text.contains(value) }
-    func clear() { lock.lock(); text = ""; lock.unlock() }
+    func clear() { lock.lock(); text = ""; activeText = ""; firstTimes = [:]; lock.unlock() }
+    func isDisplaying(_ value: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }; return activeText.contains(value)
+    }
+    func firstTime(containing value: String) -> Double? {
+        lock.lock(); defer { lock.unlock() }
+        return firstTimes.filter { $0.key.contains(value) }.map(\.value).min()
+    }
 }
 
 /// Run with the generated two-tone fixture from scripts/verify-tracks.sh.
@@ -70,6 +85,8 @@ private final class CaptionCapture: NSObject, AVPlayerItemLegibleOutputPushDeleg
             let capture = CaptionCapture(), output = AVPlayerItemLegibleOutput()
             output.setDelegate(capture, queue: .main); item.add(output)
             let player = AVPlayer(playerItem: item)
+            player.allowsExternalPlayback = false
+            player.isMuted = true
             let deadline = Date().addingTimeInterval(30)
             while item.status == .unknown && Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
             guard item.status == .readyToPlay, let group = try await item.asset.loadMediaSelectionGroup(for: .legible) else {
@@ -83,6 +100,29 @@ private final class CaptionCapture: NSObject, AVPlayerItemLegibleOutputPushDeleg
             }
             item.select(english, in: group); player.play()
             try await wait { capture.contains("English subtitles are on.") }
+            let captions = [(0.5, 5.5, "English subtitles are on."),
+                            (8.0, 9.0, "Seek to any scene."),
+                            (12.0, 13.0, "Your audio and subtitles, your choice."),
+                            (23.0, 25.0, "Ending line.")]
+            for (start, checkpoint, line) in captions {
+                try await wait { player.currentTime().seconds >= checkpoint }
+                guard capture.isDisplaying(line), let actual = capture.firstTime(containing: line), abs(actual - start) < 0.15 else {
+                    throw VeloraError("Continuous subtitle timing failed at \(checkpoint)s: expected \(line) at \(start)s, got \(capture.firstTime(containing: line) ?? -1)s")
+                }
+                print("Continuous caption at \(actual)s, still visible at \(checkpoint)s: \(line)")
+                guard item.currentMediaSelection.selectedMediaOption(in: group) == english else {
+                    throw VeloraError("Subtitle selection was lost during continuous playback")
+                }
+            }
+            let laterSegment = try await second.segment(6)
+            let timing = try runner.run(tools.executable("ffprobe"), arguments: [
+                "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=start_time", "-of", "json", laterSegment.path
+            ])
+            let streamTiming = try JSONSerialization.jsonObject(with: timing) as? [String: Any]
+            let startTime = (streamTiming?["streams"] as? [[String: Any]])?.first?["start_time"] as? String
+            guard let startTime, let pts = Double(startTime), abs(pts - 24) < 0.04 else {
+                throw VeloraError("The video transport clock reset at a chunk boundary")
+            }
             capture.clear(); player.pause()
             item.select(japanese, in: group)
             guard await player.seek(to: CMTime(seconds: 1, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) else { throw VeloraError("Subtitle seek failed") }
@@ -129,6 +169,8 @@ private final class CaptionCapture: NSObject, AVPlayerItemLegibleOutputPushDeleg
         let item = AVPlayerItem(url: url), capture = CaptionCapture(), output = AVPlayerItemLegibleOutput()
         output.setDelegate(capture, queue: .main); item.add(output)
         let player = AVPlayer(playerItem: item)
+        player.allowsExternalPlayback = false
+        player.isMuted = true
         let limit = Date().addingTimeInterval(20)
         while item.status == .unknown && Date() < limit { try await Task.sleep(for: .milliseconds(100)) }
         guard item.status == .readyToPlay,

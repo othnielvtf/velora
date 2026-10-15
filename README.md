@@ -4,7 +4,7 @@
 
 Open a movie, choose your TV, and watch. Velora converts video into H.264 and AAC as it is needed, with a seekable timeline and a compact fullscreen interface.
 
-[Download v0.2.0](https://github.com/othnielvtf/velora/releases/tag/v0.2.0) · [Report a problem](https://github.com/othnielvtf/velora/issues)
+[Download v0.2.1](https://github.com/othnielvtf/velora/releases/tag/v0.2.1) · [Report a problem](https://github.com/othnielvtf/velora/issues)
 
 ![Velora in fullscreen with its compact playback panel](docs/screenshots/fullscreen.png)
 
@@ -46,7 +46,7 @@ Intel Macs are not supported by this release.
 
 ## Install
 
-1. Download **Velora-0.2.0-macOS-arm64.zip** from [Releases](https://github.com/othnielvtf/velora/releases/tag/v0.2.0).
+1. Download **Velora-0.2.1-macOS-arm64.zip** from [Releases](https://github.com/othnielvtf/velora/releases/tag/v0.2.1).
 2. Unzip it and move **Velora.app** to Applications.
 3. Open the app. Because this preview is not notarized, macOS may block the first launch. If you trust this download, use **System Settings → Privacy & Security → Open Anyway**, then confirm the per-app prompt. See [Apple's guidance](https://support.apple.com/en-us/102445).
 

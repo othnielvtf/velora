@@ -11,7 +11,7 @@ final class StreamingTests: XCTestCase {
         XCTAssertTrue(manifest.contains("#EXT-X-PLAYLIST-TYPE:VOD"))
         XCTAssertTrue(manifest.contains("#EXTINF:2.250000,\nsegment-3.ts"))
         XCTAssertTrue(manifest.hasSuffix("#EXT-X-ENDLIST\n"))
-        XCTAssertEqual(manifest.components(separatedBy: "#EXT-X-DISCONTINUITY").count - 1, 3)
+        XCTAssertFalse(manifest.contains("#EXT-X-DISCONTINUITY"))
     }
 
     func testExactBoundaryDoesNotCreateEmptyChunk() {

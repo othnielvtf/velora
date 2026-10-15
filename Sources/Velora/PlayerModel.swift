@@ -382,7 +382,7 @@ final class PlayerModel: ObservableObject {
 
     func copyDiagnostics() {
         let text = """
-        Velora 0.2 · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
+        Velora 0.2.1 · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
         Mode: \(mode.rawValue) · Quality: \(quality.description)
         Source: \(media?.source.lastPathComponent ?? "None")
         Video: \(media?.codecLabel ?? "—") \(media?.width ?? 0)×\(media?.height ?? 0) · Audio: \(media?.audioCodec ?? "None")

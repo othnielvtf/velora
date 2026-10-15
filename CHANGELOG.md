@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 — 2026-10-16
+
+- Fix captions drifting or disappearing during uninterrupted TV Compatibility playback. Video and WebVTT playlists now keep the existing continuous movie clock instead of announcing a timeline reset every four seconds.
+- Keep MPEG-TS packet-counter reset signaling inside each independently encoded chunk; full-movie seeking remains available.
+- Check actual AVPlayer caption timing and visibility across multiple chunks through the final subtitle, in addition to switching languages and seeking.
+- Verification players stay muted and disable external playback so checks do not take over a user's AirPlay route.
+
+The continuous playback failure was reproduced locally before the fix. Physical AirPlay receiver retesting is still needed.
+
 ## 0.2.0 — 2026-10-15
 
 - Audio & Subtitles menu in windowed and compact fullscreen playback.

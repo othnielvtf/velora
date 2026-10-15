@@ -63,6 +63,8 @@ struct VeloraCheck {
             let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
             item.add(output)
             let player = AVPlayer(playerItem: item)
+            player.allowsExternalPlayback = false
+            player.isMuted = true
             let ready = Date()
             while item.status == .unknown && Date().timeIntervalSince(ready) < 30 { try await Task.sleep(for: .milliseconds(100)) }
             guard item.status == .readyToPlay else { throw VeloraError("AVPlayer did not load HLS: \(item.error?.localizedDescription ?? "timeout")") }

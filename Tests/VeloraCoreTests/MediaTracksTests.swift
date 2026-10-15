@@ -58,7 +58,7 @@ final class MediaTracksTests: XCTestCase {
         XCTAssertTrue(first.contains("日本語"))
         let playlist = StreamTimeline(duration: 13.25).playlist(segmentExtension: "vtt")
         XCTAssertTrue(playlist.contains("#EXTINF:1.250000,\nsegment-3.vtt"))
-        XCTAssertEqual(playlist.components(separatedBy: "#EXT-X-DISCONTINUITY").count - 1, 3)
+        XCTAssertFalse(playlist.contains("#EXT-X-DISCONTINUITY"))
     }
 
     func testEmptySubtitlesAndInvalidTimes() throws {

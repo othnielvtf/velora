@@ -1,5 +1,17 @@
 # Velora verification
 
+## 0.2.1 — continuous subtitle playback
+
+Checked on 16 October 2026 on the same Mac and toolchain described below.
+
+- Reproduced the 0.2.0 failure using uninterrupted playback: the caption due at eight seconds arrived around twelve seconds, and the final line was never delivered. The old language-switch and seek checks alone did not catch this.
+- Removed unnecessary HLS timeline discontinuities from both video and subtitle playlists. MPEG-TS chunks retain their existing movie-relative timestamps and in-band packet-counter discontinuity flags.
+- The regression check now observes active caption text at 5.5, 9, 13 and 25 seconds, verifies the first presentation time of every line to within 150 ms of the source cue, and confirms that the video transport clock is still at 24 seconds in chunk six.
+- Eight unit tests, HEVC/AAC and silent HDR-tagged playback/forward/backward seek checks, and the audio/subtitle switching, sidecar and Original-mode checks pass.
+- Test players are muted and explicitly disallow external playback to avoid taking over an active AirPlay session.
+
+The fix addresses a reproduced local stream-timing failure. A physical TV has not been used to confirm the corrected receiver behavior; reconnect AirPlay with a new movie session when retesting.
+
 ## 0.2.0 — audio and subtitles
 
 Checked on 15 October 2026 on the same Apple M5 Pro/macOS/Swift toolchain described below.

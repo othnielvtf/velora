@@ -13,9 +13,10 @@ public struct StreamTimeline: Sendable {
     public func playlist(segmentExtension: String = "ts") -> String {
         var lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:\(Int(ceil(segmentDuration)))",
                      "#EXT-X-MEDIA-SEQUENCE:0", "#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-INDEPENDENT-SEGMENTS"]
+        // Encoding starts on an IDR, but the movie clock is continuous. TS
+        // packet-counter resets are signaled inside the transport stream;
+        // resetting the HLS timeline here also resets the subtitle clock.
         for index in 0..<count {
-            // Each chunk has a separate encoder, PAT/PMT and AAC priming. Signal the reset explicitly.
-            if index > 0 { lines.append("#EXT-X-DISCONTINUITY") }
             lines.append(String(format: "#EXTINF:%.6f,", locale: Locale(identifier: "en_US_POSIX"), length(index)))
             lines.append("segment-\(index).\(segmentExtension)")
         }
