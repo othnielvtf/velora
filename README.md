@@ -4,11 +4,24 @@
 
 Open a movie, choose your TV, and watch. Velora converts video into H.264 and AAC as it is needed, with a seekable timeline and a compact fullscreen interface.
 
-[Download v0.2.1](https://github.com/othnielvtf/velora/releases/tag/v0.2.1) · [Report a problem](https://github.com/othnielvtf/velora/issues)
+[Download v0.2.2](https://github.com/othnielvtf/velora/releases/tag/v0.2.2) · [Report a problem](https://github.com/othnielvtf/velora/issues)
 
 ![Velora in fullscreen with its compact playback panel](docs/screenshots/fullscreen.png)
 
 > **Early preview:** local HEVC playback and streaming have been tested. Physical Samsung, LG and Hisense AirPlay receivers still need testing; compatibility and seek latency vary by TV and source. The downloadable app is ad hoc signed, **not Developer ID signed or notarized**.
+
+## What changed in v0.2.2
+
+This release improves playback, seeking and cleanup after several rounds of code audits and regression testing.
+
+- **Smoother audio through seeks:** continuous AAC encoding and a shared timing grid keep audio chunks aligned, including when the player reuses chunks from earlier seeks. Audio conversion pauses after a bounded lookahead.
+- **Reliable movie endings and timestamps:** the timeline follows playable video, excluding audio padding and container timestamp offsets. NTSC, variable frame rate and long held frames keep their final picture. Original and TV Compatibility modes retain the same scene when switching.
+- **Track choices stay explicit:** unsupported native audio/subtitle choices pause playback with guidance. Native playback commands respect that pause, and choosing a playable track clears it. Selected tracks and Pause remain intact through mode changes and pending seeks.
+- **Bounded subtitle preparation:** at most two subtitle tracks are extracted at once. Abandoned requests cancel their scans; completed text tracks are cached across movie sessions, up to 256 MB.
+- **Cleaner cancellation and quitting:** shared chunk requests retain work needed by other clients. Partial conversions are removed, timeouts stop stalled processes, and quitting waits for active and suspended media workers to exit.
+- **More reliable local streaming:** idle connections have deadlines and separate capacity from active playback requests. Anamorphic video keeps its display aspect ratio, and quality changes leave Original playback in place.
+
+All **79 regression tests** pass, together with the real HTTP/AVPlayer playback and audio/subtitle integration checks. A follow-up audit found no further actionable issues in the reviewed paths. Physical AirPlay receiver testing is still pending. See [verification details](VERIFICATION.md) and the [changelog](CHANGELOG.md).
 
 ## Features
 
@@ -40,13 +53,13 @@ Screenshots show the actual app. The landscape is original artwork rendered into
 - Apple silicon Mac (M1 or later).
 - macOS 14 Sonoma or later. The release was tested on macOS 26; earlier supported versions need testing.
 - An AirPlay-capable TV for TV playback, on the same local network as your Mac.
-- Enough free disk space for the temporary conversion cache (up to 2 GB per movie).
+- Enough free disk space for the temporary audio/video cache (up to 2 GB per movie), plus a shared text-subtitle cache capped at 256 MB.
 
 Intel Macs are not supported by this release.
 
 ## Install
 
-1. Download **Velora-0.2.1-macOS-arm64.zip** from [Releases](https://github.com/othnielvtf/velora/releases/tag/v0.2.1).
+1. Download **Velora-0.2.2-macOS-arm64.zip** from [Releases](https://github.com/othnielvtf/velora/releases/tag/v0.2.2).
 2. Unzip it and move **Velora.app** to Applications.
 3. Open the app. Because this preview is not notarized, macOS may block the first launch. If you trust this download, use **System Settings → Privacy & Security → Open Anyway**, then confirm the per-app prompt. See [Apple's guidance](https://support.apple.com/en-us/102445).
 
@@ -78,9 +91,9 @@ Use the settings button to choose stream quality or a LAN interface. If the TV a
 
 ## How it works
 
-**TV Compatibility** creates a local HLS stream of independently encoded four-second MPEG-TS chunks. Video is H.264 High Profile, up to 1080p30 at 6 Mbps or 720p30 at 3 Mbps, with stereo AAC when audio is present. Smaller sources are not enlarged. The complete VOD timeline is available immediately; requested chunks are generated on demand and cached.
+**TV Compatibility** creates a local HLS stream with independently encoded four-second H.264 video chunks, up to 1080p30 at 6 Mbps or 720p30 at 3 Mbps. Smaller sources are not enlarged, and anamorphic sources retain their display aspect ratio. Stereo AAC is encoded continuously across adjacent chunks to avoid repeated encoder priming. Audio preparation pauses after a small lookahead; distant seeks use bounded preroll on a shared audio timing grid so chunks from different seek histories still join correctly. The complete VOD timeline is available immediately; requested chunks are generated on demand and cached.
 
-The native AVPlayer handles playback and AirPlay. Velora uses Apple's receiver picker rather than implementing the AirPlay protocol itself. A token-scoped local HTTP server serves only the active movie's playlists and converted chunks. It does not expose the original file or arbitrary folders. Closing a movie stops its server, cancels conversion and removes its cache. The original file is never changed.
+The native AVPlayer handles playback and AirPlay. Velora uses Apple's receiver picker rather than implementing the AirPlay protocol itself. A token-scoped local HTTP server serves only the active movie's playlists and converted chunks. It does not expose the original file or arbitrary folders. Closing a movie stops its server, cancels conversion and removes its audio/video cache. Converted text subtitles are retained in a separate local cache capped at 256 MB, keyed to the source file and track so later sessions can reuse them. The original file is never changed.
 
 **Original** plays the original file with macOS's native format support. HEVC in a supported MP4/MOV may play directly; MKV and unsupported audio often need TV Compatibility. Direct AirPlay depends on the source and receiver.
 
@@ -88,10 +101,10 @@ The native AVPlayer handles playback and AirPlay. Velora uses Apple's receiver p
 
 Click the **caption bubble** beside the playback-speed control. The same **Audio & Subtitles** menu is available in fullscreen.
 
-- **Audio:** select a language or named track. TV Compatibility converts the selected track to stereo AAC. Switching audio briefly rebuilds the stream while retaining the movie position, paused/playing state and subtitle choice. Original mode uses native macOS audio-track selection.
+- **Audio:** select a language or named track. Original mode marks native tracks that require TV Compatibility and pauses unsupported selections with guidance, including when native controls request playback. Choosing a playable track clears the block. TV Compatibility converts the selected track to stereo AAC. Switching audio briefly rebuilds the stream while retaining the movie position, paused/playing state and subtitle choice. Original mode uses native macOS audio-track selection.
 - **Subtitles:** select a language, accessibility (SDH) track or **Off**. Embedded SubRip/SRT, ASS/SSA, WebVTT and MP4 timed text are supported in TV Compatibility. Native Original mode offers the subtitle tracks exposed by macOS.
 - **External files:** choose **Load Subtitle File…**, press **⇧⌘O**, or drop an SRT/VTT/ASS/SSA file onto an open movie. Importing or replacing a sidecar uses TV Compatibility and retains playback position. Remove it from the same menu.
-- Text subtitles travel as optional WebVTT renditions alongside the local HLS video, including over AirPlay. Switching subtitles does not re-encode the picture. TV subtitle rendering still needs physical receiver testing.
+- Text subtitles travel as optional WebVTT renditions alongside the local HLS video, including over AirPlay. Switching subtitles does not re-encode the picture. Preparing an embedded track for the first time scans the movie; the timeout scales with file size and the result is reused across sessions. At most two tracks are prepared at once, and scans stop when no requesting client needs them. TV subtitle rendering still needs physical receiver testing.
 - Captions move above the floating fullscreen controls while those controls are visible. Their normal placement returns when the controls fade.
 
 ASS/SSA is converted to basic text and supported inline formatting; custom fonts, complex positioning, animations and karaoke styling are not preserved. PGS, VobSub/DVD and other image-based subtitle tracks need an external text subtitle file in TV Compatibility. External files should use UTF-8. A subtitle language selected while paused may refresh visually when playback resumes. Select tracks from the Mac; this version does not advertise alternate audio languages to the TV's own audio menu.
@@ -141,6 +154,8 @@ Run the track-selection check with a generated two-language fixture:
 ```
 
 This checks the actual encoded audio tones, WebVTT delivery to AVPlayer, language switching, seeking, Off, external SRT/VTT/ASS conversion and subtitle URL isolation.
+
+The regression suite also covers AAC waveform and packet continuity, video padding and timestamp offsets, held frames in variable-frame-rate files, shared-request cancellation, bounded subtitle extraction, server admission and disconnects, process timeouts, subtitle-cache reuse, and native player intent. Codec checks skip when the bundled tools have not been built. To include the optional native mode-switching check, set `VELORA_PLAYER_TEST_MOVIE` to a native MP4 with at least two audio languages before running `swift test`.
 
 ### Source layout
 

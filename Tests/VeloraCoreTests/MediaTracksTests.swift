@@ -70,6 +70,19 @@ final class MediaTracksTests: XCTestCase {
         }
     }
 
+    func testEmbeddedCueOffsetUsesTheNormalizedVideoClock() throws {
+        let document = try SubtitleDocument(webVTT: "WEBVTT\n\n00:00:00.000 --> 00:00:00.010\nBefore video\n\n00:00:00.020 --> 00:00:04.023\nCrossing\n\n00:00:04.023 --> 00:00:05.023\nNext\n")
+        let first = document.segment(start: 0, duration: 4, timestampOffset: -0.023)
+        XCTAssertFalse(first.contains("Before video"))
+        XCTAssertTrue(first.contains("00:00:00.000 --> 00:00:04.000\nCrossing"))
+        XCTAssertFalse(first.contains("Next"))
+        let second = document.segment(start: 4, duration: 4, timestampOffset: -0.023)
+        XCTAssertFalse(second.contains("Crossing"))
+        XCTAssertTrue(second.contains("00:00:04.000 --> 00:00:05.000\nNext"))
+        XCTAssertTrue(document.segment(start: 4, duration: 4).contains("00:00:04.023 --> 00:00:05.023"),
+                      "External subtitle timestamps stay unchanged")
+    }
+
     private func fixture() throws -> MediaInfo {
         let json: [String: Any] = ["format": ["duration": "30.0"], "streams": [
             ["index": 0, "codec_type": "video", "codec_name": "png", "width": 600, "height": 600, "disposition": ["attached_pic": 1]],

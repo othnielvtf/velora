@@ -67,13 +67,30 @@ public struct HTTPResponse: Sendable {
 }
 
 public final class StreamHTTPServer: @unchecked Sendable {
+    private final class Client: @unchecked Sendable {
+        let id = UUID()
+        let connection: NWConnection
+        let acceptedAt = DispatchTime.now().uptimeNanoseconds
+        var isReadingHeaders = true
+        var deadline: DispatchWorkItem?
+        var requestTask: Task<Void, Never>?
+        init(_ connection: NWConnection) { self.connection = connection }
+    }
+
     private let queue = DispatchQueue(label: "app.velora.http")
     private let session: TranscodeSession
     private var listener: NWListener?
-    private var connections: [UUID: NWConnection] = [:]
+    private var connections: [UUID: Client] = [:]
+    private let pendingConnectionLimit = 24
+    private let responseConnectionLimit = 24
     private let onError: @Sendable (String) -> Void
+    private let responseHandler: (@Sendable (HTTPRequest) async -> HTTPResponse)?
     public init(session: TranscodeSession, onError: @escaping @Sendable (String) -> Void = { _ in }) {
-        self.session = session; self.onError = onError
+        self.session = session; self.onError = onError; responseHandler = nil
+    }
+
+    init(session: TranscodeSession, responseHandler: @escaping @Sendable (HTTPRequest) async -> HTTPResponse) {
+        self.session = session; self.onError = { _ in }; self.responseHandler = responseHandler
     }
 
     public func start() async throws -> UInt16 {
@@ -104,41 +121,112 @@ public final class StreamHTTPServer: @unchecked Sendable {
         URL(string: "http://\(host):\(port)/\(session.token)/master.m3u8")!
     }
 
+    func responseTimeout(for request: HTTPRequest) -> TimeInterval {
+        let prefix = "/\(session.token)/"
+        guard (request.method == "GET" || request.method == "HEAD"), request.path.hasPrefix(prefix) else { return 120 }
+        let parts = request.path.dropFirst(prefix.count).split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[0] == "subtitles",
+              let source = session.subtitles.first(where: { $0.id == parts[1] }),
+              parts[2].hasPrefix("segment-"), parts[2].hasSuffix(".vtt"),
+              let index = Int(parts[2].dropFirst(8).dropLast(4)), (0..<session.timeline.count).contains(index),
+              let size = try? source.url.resourceValues(forKeys: [.fileSizeKey]).fileSize else { return 120 }
+        return SubtitleStore.extractionTimeout(fileSize: Int64(size)) + 30
+    }
+
     private func accept(_ connection: NWConnection) {
-        guard connections.count < 24 else { connection.cancel(); return }
-        let id = UUID(); connections[id] = connection
-        connection.stateUpdateHandler = { [weak self] state in
-            if case .failed = state { self?.connections[id] = nil }
-            if case .cancelled = state { self?.connections[id] = nil }
+        // Idle sockets have their own budget, so they cannot occupy the slots
+        // needed by the player. Admit new headers by retiring the oldest idle peer.
+        let pending = connections.values.filter(\.isReadingHeaders)
+        if pending.count >= pendingConnectionLimit, let oldest = pending.min(by: { $0.acceptedAt < $1.acceptedAt }) {
+            close(oldest)
+        }
+        let client = Client(connection); connections[client.id] = client
+        connection.stateUpdateHandler = { [weak self, weak client] state in
+            guard let self, let client else { return }
+            switch state {
+            case .failed, .cancelled: self.close(client)
+            default: break
+            }
         }
         connection.start(queue: queue)
-        queue.asyncAfter(deadline: .now() + 120) { [weak self, weak connection] in
-            if self?.connections[id] != nil { connection?.cancel(); self?.connections[id] = nil }
-        }
-        receive(connection, id: id, accumulated: Data())
+        setDeadline(for: client, after: 5)
+        receiveHeaders(client, accumulated: Data())
     }
 
-    private func receive(_ connection: NWConnection, id: UUID, accumulated: Data) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { [weak self] data, _, complete, error in
-            guard let self else { return }
+    private func setDeadline(for client: Client, after seconds: TimeInterval) {
+        client.deadline?.cancel()
+        let deadline = DispatchWorkItem { [weak self, weak client] in
+            guard let self, let client else { return }
+            self.close(client)
+        }
+        client.deadline = deadline
+        queue.asyncAfter(deadline: .now() + seconds, execute: deadline)
+    }
+
+    private func close(_ client: Client) {
+        guard connections.removeValue(forKey: client.id) != nil else { return }
+        client.deadline?.cancel(); client.deadline = nil
+        client.requestTask?.cancel(); client.requestTask = nil
+        client.connection.cancel()
+    }
+
+    private func receiveHeaders(_ client: Client, accumulated: Data) {
+        client.connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { [weak self, weak client] data, _, complete, error in
+            guard let self, let client, self.connections[client.id] != nil else { return }
+            guard error == nil else { self.close(client); return }
             var buffer = accumulated
             if let data { buffer.append(data) }
-            guard buffer.count <= 16_384 else { self.send(.message(400, "Headers too large"), head: false, connection: connection); return }
-            if buffer.range(of: Data("\r\n\r\n".utf8)) != nil {
+            guard buffer.count <= 16_384 else { self.send(.message(400, "Headers too large"), head: false, client: client); return }
+            if let end = buffer.range(of: Data("\r\n\r\n".utf8)) {
                 do {
-                    let request = try HTTPRequest(buffer)
-                    Task {
-                        let response = await self.respond(request)
-                        self.queue.async { self.send(response, head: request.method == "HEAD", connection: connection) }
+                    let request = try HTTPRequest(Data(buffer[..<end.upperBound]))
+                    let activeResponses = self.connections.values.filter { !$0.isReadingHeaders }.count
+                    guard activeResponses < self.responseConnectionLimit else {
+                        self.close(client)
+                        return
                     }
-                } catch { self.send(.message(400, "Malformed request"), head: false, connection: connection) }
-            } else if complete || error != nil { connection.cancel(); self.connections[id] = nil }
-            else { self.receive(connection, id: id, accumulated: buffer) }
+                    client.isReadingHeaders = false
+                    self.setDeadline(for: client, after: self.responseTimeout(for: request))
+                    client.requestTask = Task { [weak self, weak client] in
+                        guard let self, let client else { return }
+                        let response: HTTPResponse
+                        if let handler = self.responseHandler { response = await handler(request) }
+                        else { response = await self.respond(request) }
+                        guard !Task.isCancelled else { return }
+                        self.queue.async { [weak self, weak client] in
+                            guard let self, let client, self.connections[client.id] != nil else { return }
+                            self.send(response, head: request.method == "HEAD", client: client)
+                        }
+                    }
+                    if !complete { self.monitorPeer(client) }
+                } catch { self.send(.message(400, "Malformed request"), head: false, client: client) }
+            } else if complete { self.close(client) }
+            else { self.receiveHeaders(client, accumulated: buffer) }
         }
     }
 
-    private func send(_ response: HTTPResponse, head: Bool, connection: NWConnection) {
-        connection.send(content: response.serialized(head: head), completion: .contentProcessed { _ in connection.cancel() })
+    private func monitorPeer(_ client: Client) {
+        client.connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { [weak self, weak client] _, _, complete, error in
+            guard let self, let client, self.connections[client.id] != nil else { return }
+            if error != nil { self.close(client) }
+            // A clean EOF can be a legal shutdown(SHUT_WR): the client may still
+            // be waiting to read our response. Only errors abandon its work.
+            else if !complete { self.monitorPeer(client) }
+        }
+    }
+
+    private func send(_ response: HTTPResponse, head: Bool, client: Client) {
+        if client.isReadingHeaders {
+            let activeResponses = connections.values.filter { !$0.isReadingHeaders }.count
+            guard activeResponses < responseConnectionLimit else { close(client); return }
+        }
+        client.isReadingHeaders = false
+        client.deadline?.cancel()
+        setDeadline(for: client, after: 120)
+        client.connection.send(content: response.serialized(head: head), completion: .contentProcessed { [weak self, weak client] _ in
+            guard let self, let client else { return }
+            self.close(client)
+        })
     }
 
     public func respond(_ request: HTTPRequest) async -> HTTPResponse {
@@ -170,7 +258,9 @@ public final class StreamHTTPServer: @unchecked Sendable {
             catch is CancellationError { return .message(503, "Playback session closed") }
             catch { onError(error.localizedDescription); return .message(503, "This video chunk could not be prepared") }
         } else { return .message(404, "Not found") }
-        let common = ["Accept-Ranges": "bytes", "Cache-Control": "private, max-age=3600"]
+        // Audio can be remuxed from a new encoder epoch after a seek while the
+        // segment URL stays the same. Receivers must fetch those bytes again.
+        let common = ["Accept-Ranges": "bytes", "Cache-Control": type == "video/mp2t" ? "no-store" : "private, max-age=3600"]
         if let rangeHeader = request.headers["range"] {
             do {
                 let range = try ByteRange.parse(rangeHeader, size: data.count)
@@ -187,7 +277,7 @@ public final class StreamHTTPServer: @unchecked Sendable {
     public func stop() {
         queue.async {
             self.listener?.cancel(); self.listener = nil
-            self.connections.values.forEach { $0.cancel() }; self.connections.removeAll()
+            for client in Array(self.connections.values) { self.close(client) }
         }
     }
 }

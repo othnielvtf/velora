@@ -20,6 +20,16 @@ final class StreamingTests: XCTestCase {
         XCTAssertEqual(StreamTimeline(duration: 0.1).count, 1)
     }
 
+    func testSubframeTailStaysWithTheFinalVideoChunk() {
+        let timeline = StreamTimeline(duration: 20.02, minimumFinalSegmentDuration: 1001.0 / 30_000)
+        XCTAssertEqual(timeline.count, 5)
+        XCTAssertEqual(timeline.start(4), 16)
+        XCTAssertEqual(timeline.length(4), 4.02, accuracy: 0.000001)
+        XCTAssertTrue(timeline.playlist().contains("#EXT-X-TARGETDURATION:5"))
+        XCTAssertTrue(timeline.playlist().contains("#EXTINF:4.020000,\nsegment-4.ts"))
+        XCTAssertEqual(StreamTimeline(duration: 20.1, minimumFinalSegmentDuration: 1001.0 / 30_000).count, 6)
+    }
+
     func testByteRangesCoverTVRequests() throws {
         XCTAssertEqual(try ByteRange.parse("bytes=0-187", size: 1000), ByteRange(lower: 0, upper: 187))
         XCTAssertEqual(try ByteRange.parse("bytes=800-", size: 1000), ByteRange(lower: 800, upper: 999))

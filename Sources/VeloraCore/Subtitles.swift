@@ -35,12 +35,16 @@ public struct SubtitleDocument: Sendable {
         cues = parsed.sorted { $0.start < $1.start }
     }
 
-    public func segment(start: Double, duration: Double) -> String {
+    public func segment(start: Double, duration: Double, timestampOffset: Double = 0) -> String {
         var result = "WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:0\n\n"
         for cue in cues {
-            if cue.start >= start + duration { break }
-            guard cue.end > start else { continue }
-            result += "\(Self.timestamp(cue.start)) --> \(Self.timestamp(cue.end))\(cue.settings.isEmpty ? "" : " " + cue.settings)\n\(cue.text)\n\n"
+            // WebVTT output uses millisecond timestamps. Compare on that same
+            // grid so floating-point subtraction cannot repeat a boundary cue.
+            let shiftedStart = max(0, ((cue.start + timestampOffset) * 1000).rounded() / 1000)
+            let shiftedEnd = ((cue.end + timestampOffset) * 1000).rounded() / 1000
+            if shiftedStart >= start + duration { break }
+            guard shiftedEnd > start, shiftedEnd > shiftedStart else { continue }
+            result += "\(Self.timestamp(shiftedStart)) --> \(Self.timestamp(shiftedEnd))\(cue.settings.isEmpty ? "" : " " + cue.settings)\n\(cue.text)\n\n"
         }
         return result
     }

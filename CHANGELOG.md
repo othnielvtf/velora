@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.2 — 2026-10-18
+
+- Build the compatibility timeline from playable video, excluding audio padding and normalizing source timestamp offsets.
+- Preserve long held frames in variable frame rate sources and retain sub-frame NTSC tails with the preceding chunk.
+- Map Original playback through its native video start so seeking and mode switches retain the same scene.
+- Limit subtitle extraction to two jobs and cancel scans when their final requesting client leaves.
+- Enforce unavailable-track playback blocks for native play/rate events and recover after native playable-track changes.
+- Wait for all active and previously closed media workers to be reaped before quitting, including suspended audio encoders.
+- Publish remuxed chunks only after completion; remove partial output on cancellation or failure.
+- Validate native audio/subtitle playability and retain unsupported requested tracks with guidance to use TV Compatibility.
+- Align audio seek runs to a shared AAC frame grid with preroll, preserving continuity through previously buffered chunks.
+
+- Keep AAC continuous across video chunks, bound audio lookahead, and start distant seeks at the requested scene.
+- Cancel abandoned conversion requests without interrupting other clients sharing the same chunk.
+- Cache converted subtitles across sessions and allow full-file extraction time based on source size.
+- Preserve anamorphic display aspect, selected audio/subtitle tracks across playback modes, and Pause during pending seeks.
+- Keep compatibility quality changes from reloading Original playback.
+- Separate idle HTTP connections from active requests and enforce header deadlines.
+- Enforce media-process timeouts and cancellation with bounded termination, including suspended audio workers.
+
+
 ## 0.2.1 — 2026-10-16
 
 - Fix captions drifting or disappearing during uninterrupted TV Compatibility playback. Video and WebVTT playlists now keep the existing continuous movie clock instead of announcing a timeline reset every four seconds.

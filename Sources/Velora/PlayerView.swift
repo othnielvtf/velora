@@ -44,7 +44,6 @@ struct PlayerView: View {
         .background(PlayerWindowReader(state: windowState).frame(width: 0, height: 0))
         .tint(lavender)
         .sheet(isPresented: $showingSettings) { settings }
-        .onChange(of: model.quality) { _, _ in if appeared { model.reload() } }
         .onChange(of: model.selectedAddress) { old, new in if appeared && old != new && model.mode == .compatibility { model.reload() } }
         .onChange(of: windowState.isFullscreen) { _, _ in revealControls() }
         .onChange(of: windowState.interactionCounter) { _, _ in revealControls() }

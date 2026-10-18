@@ -12,7 +12,8 @@ let package = Package(
         .executableTarget(name: "Velora", dependencies: ["VeloraCore"]),
         .executableTarget(name: "VeloraCheck", dependencies: ["VeloraCore"]),
         .executableTarget(name: "VeloraTracksCheck", dependencies: ["VeloraCore"]),
-        .testTarget(name: "VeloraCoreTests", dependencies: ["VeloraCore"])
+        .testTarget(name: "VeloraCoreTests", dependencies: ["VeloraCore"]),
+        .testTarget(name: "VeloraPlayerTests", dependencies: ["Velora", "VeloraCore"])
     ],
     swiftLanguageModes: [.v5]
 )

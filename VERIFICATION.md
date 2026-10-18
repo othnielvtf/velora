@@ -1,5 +1,49 @@
 # Velora verification
 
+## 0.2.2 — third audit fixes and follow-up review
+
+Checked on 18 October 2026 on the local Apple silicon Mac with Swift 6.4. All 79 tests passed (58 core and 21 player), with no skips, including the optional native mode-switching check. The release app rebuilt and passed deep strict signature verification. The real HTTP/AVPlayer playback check and two-language audio/subtitle check passed again.
+
+- The compatibility timeline uses video duration rather than container/audio padding, with bounded packet probing when per-video duration is missing. Input seeks account for video starting after the container clock. Original mode maps the same normalized clock through AVFoundation's nonempty video edit, retains scene position across mode changes, and stops before an audio-only tail.
+- Video conversion retains the frame preceding an input seek, expands held frames onto the output clock, then trims the requested interval. Actual AAC-padding, timestamp-offset, NTSC, low-frame-rate and variable-frame-rate fixtures request every advertised chunk and check video packet timestamps. Sub-frame final intervals stay with the preceding chunk; its playlist duration and closed AAC tail remain intact.
+- Native play, direct rate and immediate-play requests cannot bypass an unavailable audio/subtitle selection. Actual AVPlayer tests verify playable native audio recovery, stale selection notifications, unsupported intent retention and offset-file mode roundtrips.
+- Subtitle extraction is limited to two workers per session. Process-backed tests cover ten requested tracks, shared consumers, prompt individual cancellation, last-consumer reaping, queued cancellation, replacement-job identity, stop cleanup and persistent cache reuse.
+- Follow-up independent reviews found and resolved two related timing cases: Original-mode empty leading edits and held final video frames. Final read-only reviews found no further actionable defect in the reviewed player, timeline, audio, HTTP, process, cache or cancellation paths. A separate post-fix packet audit passed 26 chunks across five timing fixtures, and a distant seek succeeded after the source audio had already ended.
+
+Physical AirPlay receiver behavior, older supported macOS versions and real HDR color accuracy still need device testing.
+
+## 0.2.2 — second audit fixes
+
+Checked on 18 October 2026. All 58 tests passed (42 core and 16 player tests), including the optional native MP4 mode-switching check. The release bundle rebuilt and passed deep strict signature verification.
+
+- Application termination now waits for current and previously closed probes and sessions. The coordinator tests cover repeated quit requests, last-window termination, and real running/suspended workers that require SIGKILL escalation.
+- In the rebuilt native app, opened a generated silent 96-second movie and confirmed its real bundled FFmpeg audio worker was suspended by the lookahead limiter. Seeking and quitting removed the app and worker PIDs and the session directory; no bundle processes remained. Evidence is kept in `.build/second-audit-qa/ShutdownBefore.json` and `ShutdownAfter.json`.
+- Remux cancellation/failure tests write partial transport data, then verify it never escapes scratch storage, retries count only published files, and failed replacements retain cached input.
+- Actual AVFoundation fixtures verify playable video with unplayable native audio options. Unsupported selections block autoplay, retain the requested language and offer TV Compatibility; supported options still play and switch normally.
+- Audio runs start on a common eight-second boundary (375 AAC frames at 48 kHz) with at least one preceding grid block of preroll for nonzero anchors. Mixed original/seek audio chunks now have continuous packet timestamps, unchanged decoded sample counts, and no waveform dips at cached/seek joins in either direction. Odd/even seek starts and multiple encoder runs are covered.
+- The 96-second HTTP/AVPlayer check passed full duration, decoded video, byte ranges, HEAD, duplicate requests, token isolation and forward/backward seeking. The 30-second track check passed continuous subtitle timing, language switching/seeking, Off and external SRT/VTT/ASS conversion.
+
+Physical AirPlay receiver behavior, older supported macOS versions, and real HDR color accuracy still need device testing.
+
+
+## 0.2.2 — first audit fixes
+
+Checked on 18 October 2026 on the local Apple silicon Mac with Swift 6.4.
+
+The final full suite passed all 47 tests (38 core and 9 player tests), including the optional native MP4 mode-switching test. The release bundle rebuilt, passed deep strict signature verification, and launched to the welcome screen.
+
+- Regression checks cover AAC packet timestamps and continuous waveform amplitude across adjacent video chunks, concurrent distant audio requests, EOF cache reuse, missing earlier audio chunks, and stopping a paced audio run.
+- A 720×576 anamorphic source with SAR 16:15 is converted to 720×540 square pixels, retaining its 4:3 display aspect.
+- Actual-process tests verify stdout/stderr handling, timeout errors even when a TERM handler exits successfully, forced termination, cancellation, and suspended-process timeout accounting.
+- Shared-segment tests verify that cancelling one consumer preserves another, cancelling every consumer reaps active workers and removes partials, and cancelled queued requests never launch.
+- Real TCP tests cover idle-header admission/expiry, response capacity, peer reset cancellation, valid request-side half-closes, server shutdown, subtitle response deadlines, and no-store video responses.
+- Subtitle cache tests verify reuse across instances, source-change invalidation, concurrent extraction deduplication, corruption recovery, atomic publication and bounded storage. Large-file timeout policy uses sparse-file fixtures; a complete 20 GB movie scan was not measured.
+- Player tests cover Pause during a pending seek, stale seek callbacks, Original-mode quality changes, and canonical track matching. The optional native MP4 check passed Original → Compatibility → Original audio selection and external VTT loading without changing the selected language.
+- The real HTTP/AVPlayer integration check passed manifests, duplicate requests, byte ranges, HEAD, token isolation, full duration, decoded video, and forward/backward seek and resume. The 30-second audio/subtitle check passed continuous English cue timing, Japanese switching/seeking, Off, and external SRT/VTT/ASS conversion.
+
+Physical AirPlay receiver playback, seeking through receiver-cached chunks from a previous seek, older supported macOS versions, and real HDR color accuracy still need device testing.
+
+
 ## 0.2.1 — continuous subtitle playback
 
 Checked on 16 October 2026 on the same Mac and toolchain described below.
